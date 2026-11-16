@@ -1,26 +1,28 @@
-function fig = export_AccuSleep_StateEEG(dff, neuronFs, neuronStartSec)
+function fig = export_EEG_Neuron(dff, neuronFs, neuronStartSec)
 % 导出上下时间对齐的 State + EEG + 神经元 DF/F 热图。
 % 用法：
-% [dff,F0,figDff] = plot_cnmfe_dff_svd(neuron,1.68, ...
-%     'OutputPrefix','neuron_dff');
-% fig = export_AccuSleep_StateEEG(dff,1.68,0);
+% fig = export_AccuSleep_StateEEG(dff,Fs,0);
+% fig = export_AccuSleep_StateEEG();
 % neuronStartSec 是第1帧相对于 EEG 起点的秒数：晚开始为正。
-% 不传参数时选择已保存的 neuron_dff.mat（含 dff、Fs、t）。
+% 不传参数时选择已保存的 neuron_dff.mat，从中读取 dff 和 Fs。
 % 默认假定同步起始；真实同步需根据触发信号确定偏移。
 % 整行 NaN/Inf 跳过但保留原编号；局部缺失透明显示，色阶忽略缺失值。
-% 本文件须命名为 export_AccuSleep_StateEEG.m。
+if nargin < 2, neuronFs = []; end
 if nargin < 1 || isempty(dff)
     [fn, fp] = uigetfile('*.mat', '选择已计算的 neuron_dff.mat');
     if isequal(fn,0), error('已取消文件选择。'); end
     D = load(fullfile(fp,fn));
     assert(isfield(D,'dff'), '文件必须含有 dff 矩阵。');
     dff = D.dff;
-    if nargin < 2 || isempty(neuronFs)
-        assert(isfield(D,'Fs'), '文件没有 Fs，请显式提供神经元采样率。');
+    if isempty(neuronFs)
+        assert(isfield(D,'Fs') && ~isempty(D.Fs), ...
+            '所选 neuron_dff.mat 没有有效的 Fs，请显式提供神经元采样率。');
         neuronFs = D.Fs;
     end
 end
-if ~exist('neuronFs','var') || isempty(neuronFs), neuronFs =  2.5463; end
+if isempty(neuronFs)
+    error('缺少神经元采样率 Fs。直接传入 dff 时，请同时提供 neuronFs。');
+end
 if nargin < 3 || isempty(neuronStartSec), neuronStartSec = 0; end
 validateattributes(neuronFs, {'numeric'}, {'real','finite','scalar','positive'});
 validateattributes(neuronStartSec, {'numeric'}, {'real','finite','scalar'});
@@ -67,14 +69,13 @@ tNeuronSec = neuronStartSec + (0:size(dff,2)-1)/neuronFs;
 assert(all(isfinite(tNeuronSec)) && all(diff(tNeuronSec)>0), ...
     '神经元时间轴溢出或不递增，请检查 neuronFs 和 neuronStartSec。');
 
-% 原始采样率：1000 Hz；标签 epoch：2.5 s
+% EEG 原始采样率为 1000 Hz，epoch 时长由 EEG 和标签长度确定。
 % 使用 AccuSleep 原有频谱函数，不需要打开 AccuSleep GUI。
 
 %% ================= 用户参数 =================
 accuSleepDir = 'F:\Liulab_XYF\Code\Sleep\SleepAnnotation';   % 改成你的 AccuSleep 文件夹
 
-fs       = 1000;
-epochSec = 5;
+fs = 1000;
 
 % 导出时间范围，单位：小时
 % [] 表示全部；例如 [0.5 0.6] 表示第 30~36 分钟
@@ -117,6 +118,12 @@ assert(all(isfinite(EEG)) && all(isfinite(EMG)), ...
     'EEG 或 EMG 中含有 NaN/Inf。');
 assert(all(ismember(labels, 1:4)), ...
     '标签必须为 1=REM、2=Wake、3=NREM、4=未标注。');
+
+estimatedEpochSec = numel(EEG) / fs / numel(labels);
+epochOptions = [2.5, 5];
+[~, epochIdx] = min(abs(epochOptions - estimatedEpochSec));
+epochSec = epochOptions(epochIdx);
+fprintf('每个标签对应 %.4f s，使用 %.1f s 的 epoch。\n', estimatedEpochSec, epochSec);
 
 % 本次只绘制 State 和 EEG，EMG 仅用于检查长度
 clear EMG
